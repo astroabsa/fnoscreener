@@ -1,26 +1,33 @@
 # screener.py — Core FnO RSI/SMA Screener Logic
 
 import requests
+import gzip
+import json
 import pandas as pd
 from datetime import datetime, timedelta
 import time
 import config
 
-HEADERS = {
-    "Content-Type": "application/json",
-    "Accept": "application/json",
-    "Authorization": f"Bearer {config.UPSTOX_ACCESS_TOKEN}"
-}
-
+def _get_headers():
+    return {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": f"Bearer {config.UPSTOX_ACCESS_TOKEN}"
+    }
 
 # ─────────────────────────────────────────────────────────
-# INSTRUMENTS
+# INSTRUMENTS — Fix: decompress .json.gz properly
 # ─────────────────────────────────────────────────────────
 def get_fno_eq_instrument_keys() -> dict:
     """Returns { 'RELIANCE': 'NSE_EQ|INE002A01018', ... } for all FnO equities."""
     url  = "https://assets.upstox.com/market-quote/instruments/exchange/NSE_FO.json.gz"
     resp = requests.get(url, timeout=30)
-    instruments = resp.json()
+    resp.raise_for_status()
+
+    # Decompress gzip manually — fixes JSONDecodeError
+    raw_bytes    = resp.content
+    decompressed = gzip.decompress(raw_bytes)
+    instruments  = json.loads(decompressed.decode("utf-8"))
 
     fno_symbols = {}
     for inst in instruments:
@@ -46,11 +53,15 @@ def fetch_4h_candles(instrument_key: str) -> pd.DataFrame:
         f"{encoded}/{config.CANDLE_UNIT}/{config.CANDLE_INTERVAL}/{to_date}/{from_date}"
     )
 
-    resp = requests.get(url, headers=HEADERS, timeout=10)
+    resp = requests.get(url, headers=_get_headers(), timeout=10)
     if resp.status_code != 200:
         return pd.DataFrame()
 
-    candles = resp.json().get("data", {}).get("candles", [])
+    try:
+        candles = resp.json().get("data", {}).get("candles", [])
+    except Exception:
+        return pd.DataFrame()
+
     if not candles:
         return pd.DataFrame()
 
@@ -74,7 +85,7 @@ def calculate_rsi(series: pd.Series, period: int) -> pd.Series:
 
 
 def detect_crossover(df: pd.DataFrame):
-    """Returns 'CROSSOVER', 'CROSSUNDER', or None."""
+    """Returns (signal, rsi_val, sma_val) where signal is 'CROSSOVER', 'CROSSUNDER', or None."""
     min_candles = config.RSI_PERIOD + config.SMA_PERIOD + 5
     if len(df) < min_candles:
         return None, None, None
@@ -91,8 +102,8 @@ def detect_crossover(df: pd.DataFrame):
     prev_above = prev["rsi"] > prev["rsi_sma"]
     curr_above = curr["rsi"] > curr["rsi_sma"]
 
-    rsi_val = round(curr["rsi"], 2)
-    sma_val = round(curr["rsi_sma"], 2)
+    rsi_val = round(float(curr["rsi"]), 2)
+    sma_val = round(float(curr["rsi_sma"]), 2)
 
     if not prev_above and curr_above:
         return "CROSSOVER", rsi_val, sma_val
@@ -104,11 +115,7 @@ def detect_crossover(df: pd.DataFrame):
 # ─────────────────────────────────────────────────────────
 # MAIN SCAN
 # ─────────────────────────────────────────────────────────
-def run_scan(progress_callback=None) -> list[dict]:
-    """
-    Runs full FnO scan. Calls progress_callback(i, total, symbol) if provided.
-    Returns list of result dicts (only stocks with crossover signals).
-    """
+def run_scan(progress_callback=None) -> list:
     fno_stocks = get_fno_eq_instrument_keys()
     total      = len(fno_stocks)
     results    = []
@@ -131,7 +138,7 @@ def run_scan(progress_callback=None) -> list[dict]:
                     "Signal":        signal,
                     "RSI(10)":       rsi_val,
                     "SMA14(RSI10)":  sma_val,
-                    "Close":         round(last["close"], 2),
+                    "Close":         round(float(last["close"]), 2),
                     "LastCandle":    last["timestamp"].strftime("%Y-%m-%d %H:%M"),
                     "ScannedAt":     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
