@@ -2,8 +2,8 @@
 
 UPSTOX_ACCESS_TOKEN = "your_upstox_access_token_here"  # Regenerate daily
 
-TELEGRAM_BOT_TOKEN  = "your_telegram_bot_token_here"   # From @BotFather
-TELEGRAM_CHAT_ID    = "your_chat_id_here"               # Your chat/group ID
+TELEGRAM_BOT_TOKEN  = "8562198309:AAGgLFYU1i1rV8-yxyxvLLGauPRBZ_w4_AI"   # From @BotFather
+TELEGRAM_CHAT_ID    = "-5141295680"               # Your chat/group ID
 
 RSI_PERIOD      = 10
 SMA_PERIOD      = 14
