@@ -1,10 +1,7 @@
 # config.py — All settings in one place
-
 UPSTOX_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiIzTUJDMzIiLCJqdGkiOiI2YTExYTIyMjcxNmZkNzAwN2M3MDQ4YzQiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3OTU0MDUxNCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzc5NTczNjAwfQ.Ssw6_Rug9UfwmNraN0TbIhOosR7LkwrZ0I4z7mD_mhs"  # Regenerate daily
-
 TELEGRAM_BOT_TOKEN  = "8562198309:AAGgLFYU1i1rV8-yxyxvLLGauPRBZ_w4_AI"   # From @BotFather
 TELEGRAM_CHAT_ID    = "-5141295680"               # Your chat/group ID
-
 RSI_PERIOD      = 10
 SMA_PERIOD      = 14
 CANDLE_UNIT     = "hours"
