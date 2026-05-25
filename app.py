@@ -7,6 +7,10 @@ import requests
 import config
 import screener
 
+# Pandas >= 2.1 renamed Styler.applymap → Styler.map
+if not hasattr(pd.io.formats.style.Styler, "applymap"):
+    pd.io.formats.style.Styler.applymap = pd.io.formats.style.Styler.map
+
 st.set_page_config(
     page_title="FnO RSI Screener",
     page_icon="📈",
@@ -230,20 +234,29 @@ if results:
 
     with tab1:
         dfco = df[df["Signal"] == "CROSSOVER"][display_cols]
-        st.info("No Crossover signals.") if dfco.empty else st.dataframe(
-            dfco.style.applymap(highlight_signal, subset=["Signal"]),
-            use_container_width=True, hide_index=True)
+        if dfco.empty:
+            st.info("No Crossover signals.")
+        else:
+            st.dataframe(
+                dfco.style.applymap(highlight_signal, subset=["Signal"]),
+                use_container_width=True, hide_index=True)
 
     with tab2:
         dfcu = df[df["Signal"] == "CROSSUNDER"][display_cols]
-        st.info("No Crossunder signals.") if dfcu.empty else st.dataframe(
-            dfcu.style.applymap(highlight_signal, subset=["Signal"]),
-            use_container_width=True, hide_index=True)
+        if dfcu.empty:
+            st.info("No Crossunder signals.")
+        else:
+            st.dataframe(
+                dfcu.style.applymap(highlight_signal, subset=["Signal"]),
+                use_container_width=True, hide_index=True)
 
     with tab3:
-        st.info("No signals.") if df.empty else st.dataframe(
-            df[display_cols].style.applymap(highlight_signal, subset=["Signal"]),
-            use_container_width=True, hide_index=True)
+        if df.empty:
+            st.info("No signals.")
+        else:
+            st.dataframe(
+                df[display_cols].style.applymap(highlight_signal, subset=["Signal"]),
+                use_container_width=True, hide_index=True)
 
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button("⬇️ Download Results CSV", data=csv,
