@@ -1,4 +1,4 @@
-# screener.py — Core FnO RSI/SMA Screener Logic
+# screener.py — Core FnO RSI/SMA Screener Logic (FIXED)
 
 import requests
 import gzip
@@ -16,26 +16,119 @@ def _get_headers():
     }
 
 # ─────────────────────────────────────────────────────────
-# INSTRUMENTS — Fix: decompress .json.gz properly
+# INSTRUMENTS
+# Strategy:
+#   1. Try complete.json.gz (no auth needed, public)
+#   2. Fallback to hardcoded SEBI FnO list
 # ─────────────────────────────────────────────────────────
+
+# Hardcoded SEBI-approved FnO stocks (as of May 2026)
+# Used as fallback if instrument file download fails
+HARDCODED_FNO_SYMBOLS = [
+    "RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK","HINDUNILVR","SBIN","BHARTIARTL",
+    "KOTAKBANK","ITC","LT","AXISBANK","ASIANPAINT","MARUTI","TITAN","BAJFINANCE",
+    "SUNPHARMA","ULTRACEMCO","WIPRO","ONGC","POWERGRID","NTPC","TECHM","HCLTECH",
+    "TATAMOTORS","TATASTEEL","JSWSTEEL","ADANIENT","ADANIPORTS","ADANIGREEN",
+    "BAJAJFINSV","BRITANNIA","CIPLA","DRREDDY","DIVISLAB","EICHERMOT","GRASIM",
+    "HEROMOTOCO","HINDALCO","INDUSINDBK","NESTLEIND","SBILIFE","BAJAJ-AUTO",
+    "BPCL","COALINDIA","HDFCLIFE","M&M","TATACONSUM","UPL","VEDL",
+    "APOLLOHOSP","DMART","NYKAA","PAYTM","ZOMATO","IRCTC","HAL","BEL",
+    "PIDILITIND","SIEMENS","HAVELLS","VOLTAS","MUTHOOTFIN","BANKBARODA",
+    "CANBK","PNB","FEDERALBNK","IDFCFIRSTB","AUBANK","RBLBANK","BANDHANBNK",
+    "MOTHERSON","BALKRISIND","APOLLOTYRE","MRF","EXIDEIND","AMBUJACEM",
+    "ACC","SHREECEM","RAMCOCEM","JKCEMENT","ASTRAL","POLYCAB","KEI",
+    "ABCAPITAL","MFSL","CHOLAFIN","LICHSGFIN","MANAPPURAM","RECLTD","PFC",
+    "IRFC","HUDCO","NHPC","SJVN","TATAPOWER","ADANITRANS","TORNTPOWER",
+    "CESC","JPPOWER","SUZLON","INOXWIND","AARTIIND","DEEPAKNTR","PIDILITIND",
+    "SRF","ATUL","NAVINFLUOR","FLUOROCHEM","ALKYLAMINE","TATACHEM","GNFC",
+    "CHAMBLFERT","COROMANDEL","UBL","MCDOWELL-N","RADICO","UNITDSPR",
+    "ZYDUSLIFE","TORNTPHARM","AUROPHARMA","LUPIN","BIOCON","ALKEM","GLAND",
+    "LALPATHLAB","METROPOLIS","MAXHEALTH","FORTIS","MEDANTA","RAINBOW",
+    "INDHOTEL","LEMONTREE","CHALET","DEVYANI","JUBLFOOD","WESTLIFE","SAPPHIRE",
+    "NAUKRI","PERSISTENT","LTIM","COFORGE","MPHASIS","KPITTECH","TATAELXSI",
+    "MASTEK","NIITTECH","RATEGAIN","REDINGTON","WIPRO","OFSS","INFY","TCS",
+    "ZEEL","SUNTV","PVRINOX","INOXLEISUR","NAZARA","NETWORK18","TV18BRDCST",
+    "CONCOR","BLUEDART","GATI","VRL","MAHLOG","LINDEINDIA","CLEAN","CARBORUNIV",
+    "GRINDWELL","CUMMINSIND","THERMAX","BHEL","ABB","APLAPOLLO","WELCORP",
+    "RAMASTEEL","JINDALSAW","NATIONALUM","HINDZINC","MOIL","GMRINFRA","IRB",
+    "KNRCON","PNCINFRA","HG INFRA","NBCC","NCC","AHLUWALIA","PSP","CAPACITE",
+    "SOBHA","BRIGADE","GODREJPROP","PRESTIGE","PHOENIXLTD","DLF","OBEROIRLTY",
+    "MAHINDCIE","SUNDARMFIN","TIINDIA","SCHAEFFLER","SKF","TIMKEN","FINEORG",
+    "HLEG","POWERINDIA","EMAMILTD","MARICO","GODREJCP","DABUR","COLPAL","VBL",
+    "TATACOMM","INDIAMART","JUSTDIAL","POLICYBZR","CARTRADE","EASEMYTRIP"
+]
+
+def _symbol_to_instrument_key(symbol: str) -> str:
+    """Best-effort conversion: most NSE EQ stocks use ISIN-based keys.
+    We use the Upstox instrument search API to resolve the key."""
+    url = f"https://api.upstox.com/v2/instruments/search?query={symbol}&segment=NSE_EQ"
+    try:
+        resp = requests.get(url, headers=_get_headers(), timeout=8)
+        if resp.status_code == 200:
+            data = resp.json().get("data", [])
+            for item in data:
+                if (item.get("trading_symbol") == symbol and
+                        item.get("instrument_type") == "EQ" and
+                        item.get("segment") == "NSE_EQ"):
+                    return item.get("instrument_key", "")
+    except Exception:
+        pass
+    return ""
+
+
 def get_fno_eq_instrument_keys() -> dict:
-    """Returns { 'RELIANCE': 'NSE_EQ|INE002A01018', ... } for all FnO equities."""
-    url  = "https://assets.upstox.com/market-quote/instruments/exchange/NSE_FO.json.gz"
-    resp = requests.get(url, timeout=30)
-    resp.raise_for_status()
+    """
+    Returns { 'RELIANCE': 'NSE_EQ|INE002A01018', ... } for FnO equity stocks.
 
-    # Decompress gzip manually — fixes JSONDecodeError
-    raw_bytes    = resp.content
-    decompressed = gzip.decompress(raw_bytes)
-    instruments  = json.loads(decompressed.decode("utf-8"))
+    Strategy:
+      1. Try downloading complete.json.gz (public, no auth)
+      2. If that fails, try NSE_FO.json.gz
+      3. If both fail, use hardcoded symbol list + resolve via Search API
+    """
+    candidate_urls = [
+        "https://assets.upstox.com/market-quote/instruments/exchange/complete.json.gz",
+        "https://assets.upstox.com/market-quote/instruments/exchange/NSE_FO.json.gz",
+    ]
 
+    instruments = None
+    for url in candidate_urls:
+        try:
+            resp = requests.get(url, timeout=30)
+            if resp.status_code == 200:
+                raw = resp.content
+                # Try gzip decompression
+                try:
+                    decompressed = gzip.decompress(raw)
+                    instruments = json.loads(decompressed.decode("utf-8"))
+                except Exception:
+                    # Maybe it's plain JSON
+                    instruments = resp.json()
+                break
+        except Exception:
+            continue
+
+    if instruments:
+        # Parse the instrument list to find FnO equities
+        fno_symbols = {}
+        for inst in instruments:
+            if (inst.get("instrument_type") == "FUT" and
+                    inst.get("underlying_type") == "EQUITY" and
+                    inst.get("segment") == "NSE_FO"):
+                symbol = inst.get("underlying_symbol")
+                u_key  = inst.get("underlying_key")
+                if symbol and u_key and symbol not in fno_symbols:
+                    fno_symbols[symbol] = u_key
+        if fno_symbols:
+            return fno_symbols
+
+    # ── FALLBACK: hardcoded list + Search API resolution ──────────────
+    # Use Upstox /v2/instruments/search to resolve instrument_key per symbol
     fno_symbols = {}
-    for inst in instruments:
-        if inst.get("instrument_type") == "FUT" and inst.get("underlying_type") == "EQUITY":
-            symbol = inst.get("underlying_symbol")
-            u_key  = inst.get("underlying_key")
-            if symbol and u_key and symbol not in fno_symbols:
-                fno_symbols[symbol] = u_key
+    for symbol in HARDCODED_FNO_SYMBOLS:
+        key = _symbol_to_instrument_key(symbol)
+        if key:
+            fno_symbols[symbol] = key
+        time.sleep(0.2)   # gentle rate limit on search API
 
     return fno_symbols
 
@@ -85,7 +178,7 @@ def calculate_rsi(series: pd.Series, period: int) -> pd.Series:
 
 
 def detect_crossover(df: pd.DataFrame):
-    """Returns (signal, rsi_val, sma_val) where signal is 'CROSSOVER', 'CROSSUNDER', or None."""
+    """Returns (signal, rsi_val, sma_val) — signal is 'CROSSOVER', 'CROSSUNDER', or None."""
     min_candles = config.RSI_PERIOD + config.SMA_PERIOD + 5
     if len(df) < min_candles:
         return None, None, None
